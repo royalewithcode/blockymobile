@@ -2,238 +2,426 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- STEP 2: iPhone-critical meta. viewport-fit=cover enables env(safe-area-inset-*). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e17">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Tetris</title>
+<meta name="apple-mobile-web-app-title" content="Tetris">
+<meta name="format-detection" content="telephone=no">
+<meta name="description" content="Neon Tetris - touch-controlled, single file, fully offline.">
+<!-- STEP 8: SVG icon; iOS prefers PNG for apple-touch-icon, this degrades harmlessly. -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='32' fill='%230b0e17'/%3E%3Crect x='24' y='96' width='44' height='44' rx='6' fill='%2322d3ee'/%3E%3Crect x='68' y='96' width='44' height='44' rx='6' fill='%23a78bfa'/%3E%3Crect x='112' y='96' width='44' height='44' rx='6' fill='%23f472b6'/%3E%3Crect x='68' y='52' width='44' height='44' rx='6' fill='%234ade80'/%3E%3C/svg%3E">
+<title>Neon Tetris</title>
 <style>
-/* ===================== Reset & mobile lockdown ===================== */
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-  overscroll-behavior: none;
-  touch-action: none;               /* kill scroll + pinch-zoom at the root */
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
+/* ============================================================
+   STEP 3: Base CSS - kill every iOS scroll/zoom/selection artifact
+   ============================================================ */
 :root {
-  --bg: #0a0d16;
+  --bg: #0b0e17;
   --panel: rgba(255, 255, 255, 0.045);
+  --panel-strong: rgba(255, 255, 255, 0.075);
   --border: rgba(255, 255, 255, 0.10);
-  --text: #e8ecf5;
+  --text: #e7ebf5;
   --muted: #8b93a7;
   --accent: #22d3ee;
-  --accent2: #a78bfa;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --accent-2: #a78bfa;
+  --accent-3: #4ade80;
+  --top: env(safe-area-inset-top, 0px);
+  --right: env(safe-area-inset-right, 0px);
+  --bottom: env(safe-area-inset-bottom, 0px);
+  --left: env(safe-area-inset-left, 0px);
+  --gap: 10px;
+  --slot: clamp(46px, 19vw, 78px);      /* hold/next canvas box */
+  --key: clamp(50px, 21vw, 76px);       /* control button height */
 }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;           /* no long-press callout menu */
+  -webkit-tap-highlight-color: transparent;
+}
+html, body { height: 100%; }
+html { background: var(--bg); }
 body {
-  display: flex;
-  flex-direction: column;
+  /* STEP 4: 100vh fallback declared first, 100dvh overrides on iOS 15.4+ */
+  height: 100vh;
+  height: 100dvh;
   background:
-    radial-gradient(120% 60% at 50% -10%, #1a2140 0%, transparent 55%),
-    radial-gradient(100% 50% at 100% 115%, #171d38 0%, transparent 55%),
+    radial-gradient(1200px 700px at 50% -12%, #1c2447 0%, transparent 62%),
+    radial-gradient(900px 620px at 95% 112%, #17203c 0%, transparent 55%),
     var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;             /* no pull-to-refresh / rubber-band */
+  touch-action: none;                    /* no browser pan/zoom on the shell */
+  position: fixed;                       /* Safari URL-bar resize safety */
+  inset: 0;
+  width: 100%;
+}
+canvas { display: block; touch-action: none; }
+/* Safari on iOS < 18 only honours the prefixed form of backdrop-filter. */
+.tool, .slot, .key, .overlay { -webkit-backdrop-filter: blur(6px); }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* no font inflation on rotation */
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  touch-action: none;                  /* taps are handled in JS; no zoom/pan */
+  -webkit-appearance: none;
+  appearance: none;
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ============================================================
+   STEP 5: App shell - safe-area padding, portrait-first column
+   ============================================================ */
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+  padding: calc(var(--top) + 8px) calc(var(--right) + 10px) calc(var(--bottom) + 8px) calc(var(--left) + 10px);
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
 }
 
-/* ===================== HUD (top) ===================== */
-#hud {
-  flex: 0 0 auto;
+/* ---------- HUD ---------- */
+.hud { display: flex; flex-direction: column; gap: var(--gap); width: 100%; flex: none; }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); }
+.logo {
+  font-size: clamp(15px, 4.6vw, 21px);
+  font-weight: 800;
+  letter-spacing: 7px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2) 55%, #f472b6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.35));
+  white-space: nowrap;
+}
+.tools { display: flex; gap: 8px; }
+.tool {
+  width: 38px;
+  height: 38px;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.tool:active { transform: scale(0.92); background: var(--panel-strong); }
+.tool svg { width: 17px; height: 17px; fill: none; stroke: var(--text); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
+.tool[aria-pressed="true"] svg { stroke: var(--muted); }
+
+.readout { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--gap); width: 100%; }
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   align-items: center;
-  gap: 10px;
-  padding: calc(10px + var(--safe-top)) 14px 10px;
-}
-.hud-col { display: flex; flex-direction: column; gap: 4px; }
-.hud-col.right { text-align: right; align-items: flex-end; }
-.hud-label {
-  font-size: 9px; font-weight: 700; letter-spacing: 2px;
-  text-transform: uppercase; color: var(--muted);
-}
-.hud-val {
-  font-size: 22px; font-weight: 800; line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.hud-val.small { font-size: 15px; color: var(--text); }
-#next-wrap {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 6px 12px;
+  padding: 7px 8px 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
+  backdrop-filter: blur(6px);
+  min-width: 0;
 }
-#next { display: block; }
+.lab {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2.4px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+#hold, #next { width: var(--slot); height: var(--slot); }
+.slot.dim { opacity: 0.42; }
 
-/* ===================== Board area (middle) ===================== */
-#board-area {
-  flex: 1 1 auto;
-  min-height: 0;
-  position: relative;
+.stats {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 6px;
+  gap: 5px;
+  min-width: 0;
 }
-#board {
-  display: block;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #0d1120 0%, #080b14 100%);
+#score {
+  font-size: clamp(24px, 8vw, 34px);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+}
+.pills { display: flex; gap: 5px; flex-wrap: nowrap; }
+.pill {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.pill b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 800; }
+
+/* ---------- Stage ---------- */
+#stage { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+#board-wrap {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
   box-shadow:
     0 0 0 1px var(--border),
-    0 20px 50px rgba(0, 0, 0, 0.55),
+    0 22px 55px rgba(0, 0, 0, 0.6),
     0 0 40px rgba(34, 211, 238, 0.07);
+  background: linear-gradient(180deg, #0d1120 0%, #080b14 100%);
 }
+#board { display: block; touch-action: none; }
 
-/* ===================== Overlay (start / game over) ===================== */
-#overlay {
+/* ---------- Touch controls ---------- */
+#pad {
+  flex: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.padrow { display: flex; gap: 8px; justify-content: space-between; }
+.key {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--key);
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: transform 0.07s ease, background 0.07s ease, box-shadow 0.07s ease;
+}
+.key:active, .key.hot {
+  transform: translateY(2px) scale(0.97);
+  background: rgba(34, 211, 238, 0.16);
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.25);
+}
+.key svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.key.drop {
+  height: calc(var(--key) * 0.72);
+  font-size: 13px;
+  letter-spacing: 3.5px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.20), rgba(74, 222, 128, 0.20));
+  border-color: rgba(34, 211, 238, 0.34);
+  color: #d9fbff;
+}
+.key.drop:active, .key.drop.hot { background: linear-gradient(90deg, rgba(34, 211, 238, 0.42), rgba(74, 222, 128, 0.42)); }
+
+/* ---------- Overlay ---------- */
+.overlay {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 9, 17, 0.80);
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
-  transition: opacity 0.18s ease;
-  border-radius: 12px;
+  background: rgba(7, 9, 17, 0.86);
+  backdrop-filter: blur(6px);
+  transition: opacity 0.2s ease;
+  padding: 14px;
 }
-#overlay.hidden { opacity: 0; pointer-events: none; }
-.ov-card { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; padding: 0 20px; }
-.ov-title {
-  font-size: 30px; font-weight: 800; letter-spacing: 8px;
-  background: linear-gradient(90deg, #22d3ee, #a78bfa 55%, #f472b6);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.35));
+.overlay.hidden { opacity: 0; pointer-events: none; }
+.ov-card { display: flex; flex-direction: column; align-items: center; gap: 9px; text-align: center; max-width: 300px; }
+.ov-card h2 {
+  font-size: clamp(19px, 6vw, 27px);
+  font-weight: 800;
+  letter-spacing: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2) 60%, #f472b6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
-.ov-sub { font-size: 13px; line-height: 1.7; color: var(--muted); }
-.ov-sub b { color: var(--text); }
-.ov-btn {
-  margin-top: 6px;
+.ov-card p { font-size: 11.5px; line-height: 1.85; color: var(--muted); }
+.ov-card p b { color: var(--text); font-weight: 700; }
+.ov-card .keys { display: grid; gap: 4px; justify-items: center; margin-top: 2px; }
+.cta {
+  margin-top: 10px;
   min-width: 190px;
-  padding: 15px 30px;
-  font-family: inherit;
-  font-size: 15px; font-weight: 700; letter-spacing: 2px;
-  color: #0a0d16;
-  background: linear-gradient(90deg, #22d3ee, #4ade80);
-  border: none; border-radius: 12px; cursor: pointer;
-  box-shadow: 0 0 28px rgba(34, 211, 238, 0.4);
+  min-height: 48px;                       /* >= 44px tap target */
+  padding: 13px 26px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2.6px;
+  color: #06111a;
+  background: linear-gradient(90deg, var(--accent), var(--accent-3));
+  border-radius: 12px;
+  box-shadow: 0 0 26px rgba(34, 211, 238, 0.4);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
-  touch-action: manipulation;
 }
-.ov-btn:active { transform: scale(0.97); }
+.cta:active { transform: translateY(1px) scale(0.98); box-shadow: 0 0 14px rgba(34, 211, 238, 0.35); }
+.badge {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
 
-/* ===================== Controls (bottom) ===================== */
-#controls {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 8px;
-  padding: 6px 12px calc(12px + var(--safe-bottom));
+/* ============================================================
+   STEP 5b: Landscape - board on the left, info + pad on the right
+   ============================================================ */
+@media (orientation: landscape) {
+  :root { --key: clamp(38px, 11vh, 56px); --slot: clamp(40px, 9vh, 62px); --gap: 8px; }
+  #app { flex-direction: row; align-items: stretch; gap: 12px; max-width: none; }
+  .hud { flex-direction: column; order: 2; width: min(38vw, 210px); justify-content: center; gap: 10px; }
+  .readout { grid-template-columns: auto 1fr auto; }
+  .stats { justify-content: center; }
+  #stage { order: 1; flex: 1 1 auto; height: 100%; }
+  #pad { order: 3; width: min(30vw, 172px); justify-content: center; }
+  .padrow { flex-direction: column; }
+  .key { width: 100%; }
 }
-.ctl {
-  flex: 1 1 0;
-  min-height: 82px;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 5px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  color: var(--text);
-  font-family: inherit;
-  cursor: pointer;
-  touch-action: none;             /* each button: no scroll / no zoom */
-  transition: background 0.08s ease, transform 0.06s ease, border-color 0.08s ease;
+@media (max-height: 620px) and (orientation: portrait) {
+  :root { --key: 44px; --slot: 42px; --gap: 6px; }
+  #score { font-size: 22px; }
 }
-.ctl .ico { font-size: 26px; line-height: 1; }
-.ctl .lbl { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
-.ctl:active, .ctl.held {
-  background: rgba(34, 211, 238, 0.16);
-  border-color: var(--accent);
-  transform: scale(0.96);
-}
-.ctl:active .ico, .ctl.held .ico { color: var(--accent); }
-.ctl.sep { margin-left: 8px; }    /* physical gap between move/rotate and drop cluster */
+noscript { color: var(--text); font-size: 13px; padding: 20px; display: block; text-align: center; }
 </style>
 </head>
 <body>
-  <header id="hud">
-    <div class="hud-col">
-      <span class="hud-label">Score</span>
-      <span class="hud-val" id="stat-score">0</span>
-      <span class="hud-label" style="margin-top:2px">High</span>
-      <span class="hud-val small" id="stat-high">0</span>
+<!-- STEP 6: DOM - HUD strip, hold/next canvases, board stage, control cluster, overlay -->
+<main id="app">
+  <header class="hud">
+    <div class="bar">
+      <span class="logo">NEON TETRIS</span>
+      <span class="tools">
+        <button class="tool" id="btn-mute" type="button" aria-label="Toggle sound" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h3l5 4V5L7 9H4z"/><path id="wave1" d="M16 8.5a4.5 4.5 0 0 1 0 7"/><path id="wave2" d="M18.5 6a8 8 0 0 1 0 12"/></svg>
+        </button>
+        <button class="tool" id="btn-pause" type="button" aria-label="Pause or resume">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+        </button>
+      </span>
     </div>
-    <div id="next-wrap">
-      <span class="hud-label">Next</span>
-      <canvas id="next" width="84" height="84"></canvas>
-    </div>
-    <div class="hud-col right">
-      <span class="hud-label">Level</span>
-      <span class="hud-val" id="stat-level">1</span>
-      <span class="hud-label" style="margin-top:2px">Lines</span>
-      <span class="hud-val small" id="stat-lines">0</span>
+    <div class="readout">
+      <div class="slot" id="slot-hold">
+        <span class="lab">Hold</span>
+        <canvas id="hold"></canvas>
+      </div>
+      <div class="stats">
+        <div id="score">0</div>
+        <div class="pills">
+          <span class="pill">HI <b id="high">0</b></span>
+          <span class="pill">LVL <b id="level">1</b></span>
+          <span class="pill">LINES <b id="lines">0</b></span>
+        </div>
+      </div>
+      <div class="slot" id="slot-next">
+        <span class="lab">Next</span>
+        <canvas id="next"></canvas>
+      </div>
     </div>
   </header>
 
-  <section id="board-area">
-    <canvas id="board" width="280" height="560"></canvas>
-    <div id="overlay">
-      <div class="ov-card">
-        <h2 class="ov-title" id="ov-title">TETRIS</h2>
-        <p class="ov-sub" id="ov-text"></p>
-        <button id="ov-btn" type="button">START GAME</button>
+  <section id="stage">
+    <div id="board-wrap">
+      <canvas id="board" width="270" height="540"></canvas>
+      <div id="overlay" class="overlay">
+        <div class="ov-card">
+          <h2 id="ov-title">NEON TETRIS</h2>
+          <p id="ov-text"></p>
+          <button class="cta" id="ov-btn" type="button">START GAME</button>
+          <span class="badge" id="ov-badge"></span>
+        </div>
       </div>
     </div>
   </section>
 
-  <nav id="controls">
-    <button class="ctl" data-act="left"   type="button"><span class="ico">&#9664;</span><span class="lbl">Left</span></button>
-    <button class="ctl" data-act="right"  type="button"><span class="ico">&#9654;</span><span class="lbl">Right</span></button>
-    <button class="ctl" data-act="rotate" type="button"><span class="ico">&#8635;</span><span class="lbl">Rotate</span></button>
-    <button class="ctl sep" data-act="soft" type="button"><span class="ico">&#9660;</span><span class="lbl">Soft</span></button>
-    <button class="ctl" data-act="hard"   type="button"><span class="ico">&#10565;</span><span class="lbl">Drop</span></button>
+  <nav id="pad" aria-label="Game controls">
+    <div class="padrow">
+      <button class="key" data-act="left" type="button" aria-label="Move left">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l-7 7 7 7"/></svg>
+      </button>
+      <button class="key" data-act="right" type="button" aria-label="Move right">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5l7 7-7 7"/></svg>
+      </button>
+      <button class="key" data-act="ccw" type="button" aria-label="Rotate counter-clockwise">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h6V4"/><path d="M4.6 13a7.5 7.5 0 1 0 2.2-6.4L4 9"/></svg>
+      </button>
+      <button class="key" data-act="cw" type="button" aria-label="Rotate clockwise">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 9h-6V4"/><path d="M19.4 13A7.5 7.5 0 1 1 17.2 6.6L20 9"/></svg>
+      </button>
+    </div>
+    <div class="padrow">
+      <button class="key drop" data-act="drop" type="button" aria-label="Hard drop">DROP</button>
+    </div>
   </nav>
+</main>
+<noscript>This game requires JavaScript.</noscript>
 
 <script>
 (() => {
 'use strict';
 
 /* ============================================================
- *  Constants
- * ========================================================== */
+   STEP 11 / 7: Tunables - every feel knob in one place
+   ========================================================== */
+const TUNING = {
+  /* Gravity: seconds per row at level 1, multiplied down each level. */
+  GRAVITY_BASE: 0.9,          // casual ramp (0.8 in arcade rules)
+  GRAVITY_FACTOR: 0.84,
+  GRAVITY_MIN: 0.05,
+  SOFT_MS: 28,                // ms per cell while soft-dropping
+  DAS_MS: 150,                // auto-shift delay before repeat
+  ARR_MS: 45,                 // auto-repeat rate while held
+  LOCK_DELAY: 0.5,            // s resting on the stack before lock-in
+  MAX_LOCK_RESETS: 15,        // capped move/rotate lock resets
+  CLEAR_FLASH_MS: 190,        // line clear flash
+  LINES_PER_LEVEL: 10,
+  /* Touch gesture thresholds, in CSS pixels / ms / px-per-ms. */
+  DRAG_STEP: 24,              // horizontal px per column shift
+  TAP_MS: 250,                // max press length for a tap-rotate
+  TAP_SLOP: 14,             // max travel for a tap-rotate
+  SOFT_INTENT: 46,            // downward drag that starts soft drop
+  FLICK_V: 0.85,              // px/ms vertical speed for a flick
+  FLICK_MIN: 46,              // min upward travel for a hard-drop flick
+  SOFT_FLICK_V: 1.35,        // fast downward flick = hard drop
+  /* Rendering */
+  GUTTER: 6,                  // px reserved around the board when fitting
+  MAX_DPR: 3,
+};
+
 const COLS = 10;
 const ROWS = 20;
-const CELL = 28;                    // logical board cell (px)
-const W = COLS * CELL;              // 280
-const H = ROWS * CELL;              // 560
-const NEXT_W = 84, NEXT_H = 84, NEXT_CELL = 16;
-
-const DAS_MS = 150;                 // auto-shift delay before repeat (hold)
-const ARR_MS = 45;                  // auto-repeat rate while held
-const LOCK_DELAY = 0.5;             // s resting before lock-in
-const MAX_LOCK_RESETS = 15;         // capped move/rotate lock resets
-const CLEAR_FLASH_MS = 180;         // line clear flash (ms)
-const LINES_PER_LEVEL = 10;
-const LINE_SCORES = [0, 100, 300, 500, 800];
-const GRAVITY_SEC = 1.1;            // constant fall speed: 1.10 s per row, all levels
-const LS_KEY = '***';
+const LINE_SCORES = [0, 100, 300, 500, 800];   // indexed by lines cleared
+const LS_HIGH = 'tetris-mobile-high';
+const LS_MUTE = 'tetris-mobile-muted';
 
 const COLORS = {
   I: '#22d3ee', J: '#3b82f6', O: '#facc15', S: '#4ade80',
   T: '#a78bfa', Z: '#f87171', L: '#fb923c',
 };
 
-/* SRS spawn-orientation matrices; 1 = filled cell. */
+/* ============================================================
+   STEP 8: Shapes + SRS tables
+   (kick pairs are [dCol, dRow] with dRow positive = DOWN)
+   ========================================================== */
 const SHAPES = {
   I: [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]],
   J: [[1, 0, 0], [1, 1, 1], [0, 0, 0]],
@@ -244,8 +432,6 @@ const SHAPES = {
   Z: [[1, 1, 0], [0, 1, 1], [0, 0, 0]],
 };
 
-/* SRS wall-kick tables (dCol, dRow) in grid coords.
- * Orientation index: 0 = spawn, 1 = R, 2 = 180, 3 = L. */
 const KICKS_JLSTZ = {
   '0>1': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
   '1>0': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
@@ -275,87 +461,114 @@ for (const type of Object.keys(SHAPES)) {
   for (let i = 1; i < 4; i += 1) states.push(rotateCW(states[i - 1]));
   ROTATIONS[type] = states;
 }
+const TYPES = Object.keys(SHAPES);
 
 /* ============================================================
- *  DOM references & canvas setup (DPR-aware for crisp retina)
- * ========================================================== */
-const board = document.getElementById('board');
-const nextC = document.getElementById('next');
-const ctx = board.getContext('2d');
-const nctx = nextC.getContext('2d');
-ctx.imageSmoothingEnabled = false;
-nctx.imageSmoothingEnabled = false;
-
-const el = {
-  score: document.getElementById('stat-score'),
-  high: document.getElementById('stat-high'),
-  level: document.getElementById('stat-level'),
-  lines: document.getElementById('stat-lines'),
-  overlay: document.getElementById('overlay'),
-  ovTitle: document.getElementById('ov-title'),
-  ovText: document.getElementById('ov-text'),
-  ovBtn: document.getElementById('ov-btn'),
-  hud: document.getElementById('hud'),
-  controls: document.getElementById('controls'),
+   STEP 19: Persistence (Safari private mode throws - wrap it)
+   ========================================================== */
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : v; }
+    catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, String(value)); } catch { /* ignore */ }
+  },
 };
-
-function setupCanvases() {
-  const dpr = window.devicePixelRatio || 1;
-  board.width = W * dpr; board.height = H * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  nextC.width = NEXT_W * dpr; nextC.height = NEXT_H * dpr;
-  nctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-/* Scale the board's display size to fit the space between HUD and
- * controls, preserving the 1:2 aspect. Called on load + resize. */
-function fitBoard() {
-  const hudH = el.hud.offsetHeight;
-  const ctrlH = el.controls.offsetHeight;
-  const pad = 12;                                   // board-area padding + gaps
-  const availW = window.innerWidth - pad * 2;
-  const availH = window.innerHeight - hudH - ctrlH - pad * 2;
-  const scale = Math.min(availW / W, availH / H, 1.6);
-  board.style.width = Math.max(60, Math.floor(W * scale)) + 'px';
-  board.style.height = Math.max(120, Math.floor(H * scale)) + 'px';
-}
-
-const loadHigh = () => { try { return Number(localStorage.getItem(LS_KEY)) || 0; } catch { return 0; } };
-const saveHigh = (value) => { try { localStorage.setItem(LS_KEY, String(value)); } catch { /* ignore */ } };
+const loadHigh = () => Number(store.get(LS_HIGH, '0')) || 0;
+const saveHigh = () => store.set(LS_HIGH, state.high);
 
 /* ============================================================
- *  Game state
- * ========================================================== */
+   STEP 9: Pure state layer
+   ========================================================== */
 const emptyGrid = () => Array.from({ length: ROWS }, () => Array(COLS).fill(null));
 
 const state = {
-  grid: emptyGrid(),      // ROWS x COLS; null or a piece key
-  piece: null,            // { type, rot, row, col, matrix }
+  grid: emptyGrid(),     // ROWS x COLS; null or a piece key
+  piece: null,           // { type, rot, row, col, matrix }
+  bag: [],               // 7-bag randomizer
   nextType: null,
-  bag: [],                // 7-bag randomizer
+  holdType: null,
+  canHold: true,
   score: 0,
   high: loadHigh(),
+  prevHigh: 0,           // high as it stood when this game started (for the badge)
   lines: 0,
   level: 1,
-  dropTimer: 0,           // s accumulated toward the next gravity step
-  lockTimer: 0,           // s spent resting on the stack
+  dropTimer: 0,          // s accumulated toward the next gravity step
+  lockTimer: 0,          // s spent resting on the stack
   lockResets: 0,
-  clearing: null,         // { rows: number[], t: ms } while the flash runs
-  status: 'title',        // 'title' | 'playing' | 'over'
+  clearing: null,        // { rows: number[], t: ms } while the flash runs
+  status: 'title',       // 'title' | 'playing' | 'paused' | 'over'
+  muted: store.get(LS_MUTE, '0') === '1',
 };
 
-// Input hold state + DAS/ARR bookkeeping (timers in ms).
-const keys = { left: false, right: false, down: false };
-const das = { dir: 0, timer: 0, charged: false, arr: 0 };
-let softTimer = 0;
+/* Held-button / held-key bookkeeping (all timers in ms). dasDir carries the
+   direction that is currently held down for the DAS/ARR auto-shift. */
+const input = {
+  soft: false,
+  dasDir: 0, dasTimer: 0, charged: false, arr: 0,
+  softTimer: 0,
+};
 
-/* Constant gravity: 1.10 s per row regardless of level. */
-const gravityInterval = () => GRAVITY_SEC;
+/* Render metrics, refreshed by fitAll(). */
+const view = { cell: 27, w: 270, h: 540, slotCell: 12 };
+
+/* Seconds per gravity row; shrinks as the level climbs. */
+const gravityInterval = () =>
+  Math.max(TUNING.GRAVITY_MIN, TUNING.GRAVITY_BASE * Math.pow(TUNING.GRAVITY_FACTOR, state.level - 1));
 
 /* ============================================================
- *  Board & piece helpers
- * ========================================================== */
-/* True when the matrix at (row, col) hits a wall, floor, or locked cell. */
+   STEP 7: Canvas fitting - DPR-aware, measured from layout
+   ========================================================== */
+const boardEl = document.getElementById('board');
+const holdEl = document.getElementById('hold');
+const nextEl = document.getElementById('next');
+const ctx = boardEl.getContext('2d');
+const hctx = holdEl.getContext('2d');
+const nctx = nextEl.getContext('2d');
+
+function fitCanvas(canvas, context, cssW, cssH) {
+  const dpr = Math.min(window.devicePixelRatio || 1, TUNING.MAX_DPR);
+  cssW = Math.max(40, Math.floor(cssW));
+  cssH = Math.max(40, Math.floor(cssH));
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);   // draw in CSS pixel space
+  context.imageSmoothingEnabled = false;
+  return { cssW: cssW, cssH: cssH };
+}
+
+function fitAll() {
+  const stage = el.stage;
+  const availW = stage.clientWidth - TUNING.GUTTER * 2;
+  const availH = stage.clientHeight - TUNING.GUTTER * 2;
+  let cell = Math.floor(Math.min(availW / COLS, availH / ROWS));
+  cell = Math.max(8, Math.min(cell, 48));
+  const bw = cell * COLS;
+  const bh = cell * ROWS;
+  // Skip when nothing changed - guarantees the ResizeObserver cannot loop.
+  const same = cell === view.cell && bw === view.w && bh === view.h &&
+    boardEl.style.width === bw + 'px' && boardEl.style.height === bh + 'px';
+  view.cell = cell;
+  view.w = bw;
+  view.h = bh;
+  if (!same) fitCanvas(boardEl, ctx, bw, bh);
+
+  const slotW = holdEl.clientWidth || 48;
+  const slotH = holdEl.clientHeight || 48;
+  view.slotCell = Math.max(6, Math.floor(Math.min(slotW / 4, slotH / 4)));
+  fitCanvas(holdEl, hctx, slotW, slotH);
+  fitCanvas(nextEl, nctx, nextEl.clientWidth || 48, nextEl.clientHeight || 48);
+}
+
+/* ============================================================
+   STEP 9b: Board & piece helpers
+   ========================================================== */
+/* True when the matrix at (row, col) overlaps a wall, the floor, or a
+ * locked cell. Cells above the board top (row < 0) are allowed. */
 function collides(matrix, row, col) {
   for (let r = 0; r < matrix.length; r += 1) {
     for (let c = 0; c < matrix[r].length; c += 1) {
@@ -369,10 +582,10 @@ function collides(matrix, row, col) {
   return false;
 }
 
-/* 7-bag randomizer: shuffle I..Z, deal until empty, reshuffle. */
+/* 7-bag randomizer: every 7 pieces appear once before the bag refills. */
 function nextFromBag() {
   if (state.bag.length === 0) {
-    state.bag = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
+    state.bag = TYPES.slice();
     for (let i = state.bag.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
       [state.bag[i], state.bag[j]] = [state.bag[j], state.bag[i]];
@@ -381,34 +594,33 @@ function nextFromBag() {
   return state.bag.pop();
 }
 
+/* Promote the queued piece onto the board and queue the next one. */
 function spawnPiece() {
-  const type = state.nextType;
+  const type = state.nextType || nextFromBag();
   state.nextType = nextFromBag();
-  state.piece = { type, rot: 0, row: 0, col: 3, matrix: ROTATIONS[type][0] };
+  state.canHold = true;
+  state.piece = { type: type, rot: 0, row: 0, col: 3, matrix: ROTATIONS[type][0] };
   state.dropTimer = 0;
   state.lockTimer = 0;
   state.lockResets = 0;
-  if (collides(state.piece.matrix, state.piece.row, state.piece.col)) gameOver();
-}
-
-function gameOver() {
-  state.status = 'over';
-  state.piece = null;
-  saveHigh(state.high);
-  setOverlay('over');
+  if (collides(state.piece.matrix, state.piece.row, state.piece.col)) {
+    state.piece = null;
+    gameOver();
+  }
+  refreshSlots();
 }
 
 /* ============================================================
- *  Scoring & player actions
- * ========================================================== */
+   STEP 10: Player actions
+   ========================================================== */
 function addScore(n) {
   state.score += n;
-  if (state.score > state.high) state.high = state.score;
+  if (state.score > state.high) { state.high = state.score; saveHigh(); }
 }
 
 /* A successful move/rotation grants a fresh lock delay (capped). */
 function resetLock() {
-  if (state.lockResets < MAX_LOCK_RESETS) {
+  if (state.lockResets < TUNING.MAX_LOCK_RESETS) {
     state.lockTimer = 0;
     state.lockResets += 1;
   }
@@ -416,10 +628,11 @@ function resetLock() {
 
 function tryMove(dir) {
   const p = state.piece;
-  if (!p) return false;
+  if (!p || state.status !== 'playing') return false;
   if (collides(p.matrix, p.row, p.col + dir)) return false;
   p.col += dir;
   resetLock();
+  Sound.move();
   return true;
 }
 
@@ -442,25 +655,54 @@ function hardDrop() {
   while (!collides(p.matrix, p.row + 1, p.col)) { p.row += 1; dist += 1; }
   addScore(dist * 2);
   state.lockTimer = 0;
+  Sound.drop();
   lockPiece();
 }
 
-/* Rotate CW/CCW with SRS wall kicks. O is symmetric (no-op). */
+/* Rotate CW/CCW with SRS wall kicks: base rotation first, then each kick.
+ * The O piece is rotationally symmetric, so it is a no-op. */
 function rotate(dir) {
   const p = state.piece;
   if (!p || state.status !== 'playing' || p.type === 'O') return false;
   const from = p.rot;
   const to = (p.rot + (dir === 1 ? 1 : 3)) % 4;
-  const table = (p.type === 'I' ? KICKS_I : KICKS_JLSTZ)[`${from}>${to}`];
+  const table = (p.type === 'I' ? KICKS_I : KICKS_JLSTZ)[from + '>' + to];
   const matrix = ROTATIONS[p.type][to];
-  for (const [dc, dr] of table) {
+  for (let i = 0; i < table.length; i += 1) {
+    const dc = table[i][0];
+    const dr = table[i][1];
     if (!collides(matrix, p.row + dr, p.col + dc)) {
-      p.rot = to; p.matrix = matrix; p.row += dr; p.col += dc;
+      p.rot = to;
+      p.matrix = matrix;
+      p.row += dr;
+      p.col += dc;
       resetLock();
+      Sound.rotate();
       return true;
     }
   }
   return false;
+}
+
+/* Swap the active piece with the hold slot; one swap per piece. */
+function holdPiece() {
+  const p = state.piece;
+  if (!p || state.status !== 'playing' || !state.canHold) return false;
+  const held = state.holdType;
+  state.holdType = p.type;
+  const type = held || nextFromBag();
+  state.piece = { type: type, rot: 0, row: 0, col: 3, matrix: ROTATIONS[type][0] };
+  state.dropTimer = 0;
+  state.lockTimer = 0;
+  state.lockResets = 0;
+  state.canHold = false;
+  Sound.rotate();
+  refreshSlots();
+  if (collides(state.piece.matrix, state.piece.row, state.piece.col)) {
+    state.piece = null;
+    gameOver();
+  }
+  return true;
 }
 
 /* Bake the piece into the grid, then handle full lines. */
@@ -483,32 +725,576 @@ function lockPiece() {
   for (let r = 0; r < ROWS; r += 1) {
     if (state.grid[r].every((cell) => cell !== null)) full.push(r);
   }
-  if (full.length > 0) {
-    state.clearing = { rows: full, t: CLEAR_FLASH_MS };
-  } else {
-    spawnPiece();
-  }
-}
-
-function removeLines(rows) {
-  rows.sort((a, b) => a - b);
-  for (const r of rows) {
-    state.grid.splice(r, 1);
-    state.grid.unshift(Array(COLS).fill(null));
-  }
-  const n = rows.length;
-  state.lines += n;
-  addScore(LINE_SCORES[n] * state.level);
-  state.level = Math.floor(state.lines / LINES_PER_LEVEL) + 1;
+  if (full.length > 0) state.clearing = { rows: full, t: TUNING.CLEAR_FLASH_MS };
+  else spawnPiece();
 }
 
 /* ============================================================
- *  Update — once per frame, dt in seconds
- * ========================================================== */
+   STEP 9c: Line clearing
+   ========================================================== */
+function removeLines(rows) {
+  const list = rows.slice().sort((a, b) => a - b);
+  for (let i = 0; i < list.length; i += 1) {
+    state.grid.splice(list[i], 1);
+    state.grid.unshift(Array(COLS).fill(null));
+  }
+  const n = list.length;
+  state.lines += n;
+  const before = state.level;
+  addScore(LINE_SCORES[n] * state.level);
+  state.level = Math.floor(state.lines / TUNING.LINES_PER_LEVEL) + 1;
+  Sound.clear(n);
+  if (state.level > before) Sound.levelUp();
+}
+
+/* ============================================================
+   STEP 20: Game flow
+   ========================================================== */
+function newGame() {
+  state.grid = emptyGrid();
+  state.score = 0;
+  state.prevHigh = state.high;
+  state.lines = 0;
+  state.level = 1;
+  state.bag = [];
+  state.holdType = null;
+  state.canHold = true;
+  state.clearing = null;
+  state.dropTimer = 0;
+  state.lockTimer = 0;
+  state.lockResets = 0;
+  input.soft = false;
+  input.dasDir = 0; input.dasTimer = 0; input.charged = false; input.arr = 0; input.softTimer = 0;
+  touch.reset();
+  touch.multi = false;
+  state.nextType = nextFromBag();
+  spawnPiece();
+  state.status = 'playing';
+  setOverlay('hidden');
+  refreshSlots();
+  syncHUD(true);
+}
+
+function gameOver() {
+  state.status = 'over';
+  state.piece = null;
+  saveHigh();
+  Sound.gameOver();
+  setOverlay('over');
+  syncHUD(true);
+}
+
+function togglePause() {
+  if (state.status === 'playing') {
+    state.status = 'paused';
+    input.soft = false;
+    input.dasDir = 0; input.charged = false;
+    touch.reset();
+    setOverlay('paused');
+  } else if (state.status === 'paused') {
+    state.status = 'playing';
+    last = 0;                       // avoid a giant dt after resume
+    touch.multi = false;
+    setOverlay('hidden');
+  }
+}
+
+/* ============================================================
+   STEP 18: Lazy WebAudio - context is created/resumed on a gesture only
+   (iOS suspends an AudioContext started before user interaction.
+    NOTE: navigator.vibrate is unsupported in iOS Safari, so feedback is
+    visual: the active piece and buttons flash instead of buzzing.)
+   ========================================================== */
+const Sound = {
+  ac: null,
+  ready: false,
+  /* initAudio(): the AudioContext is created and resumed here, inside a real
+     user gesture (touchstart / mousedown / keydown), never at page load. */
+  unlock() {
+    if (state.muted) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!this.ac) {
+      try { this.ac = new AC({ latencyHint: 'interactive' }); } catch { return; }
+    }
+    if (this.ac.state === 'suspended' && this.ac.resume) {
+      this.ac.resume().then(() => { this.ready = true; }, () => {});
+    } else this.ready = true;
+  },
+  tone(freq, dur, type, gain, delay) {
+    if (state.muted || !this.ac || !this.ready) return;
+    const t0 = this.ac.currentTime + (delay || 0);
+    const osc = this.ac.createOscillator();
+    const amp = this.ac.createGain();
+    osc.type = type || 'triangle';
+    osc.frequency.setValueAtTime(freq, t0);
+    amp.gain.setValueAtTime(0, t0);
+    amp.gain.linearRampToValueAtTime(gain || 0.06, t0 + 0.008);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(amp).connect(this.ac.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  },
+  move() { this.tone(210, 0.045, 'square', 0.03); },
+  rotate() { this.tone(360, 0.06, 'triangle', 0.05); },
+  drop() { this.tone(120, 0.09, 'sawtooth', 0.07); },
+  clear(n) {
+    const notes = [523, 659, 784, 1046];
+    for (let i = 0; i < Math.min(4, Math.max(1, n)); i += 1) {
+      this.tone(notes[i], 0.14, 'triangle', 0.07, i * 0.055);
+    }
+  },
+  levelUp() { [392, 523, 659, 880].forEach((f, i) => this.tone(f, 0.16, 'square', 0.055, i * 0.07)); },
+  gameOver() { [392, 330, 262, 196].forEach((f, i) => this.tone(f, 0.26, 'triangle', 0.075, i * 0.12)); },
+};
+
+/* ============================================================
+   STEP 17: HUD, slots & overlay
+   ========================================================== */
+const el = {
+  score: document.getElementById('score'),
+  high: document.getElementById('high'),
+  level: document.getElementById('level'),
+  lines: document.getElementById('lines'),
+  overlay: document.getElementById('overlay'),
+  ovTitle: document.getElementById('ov-title'),
+  ovText: document.getElementById('ov-text'),
+  ovBtn: document.getElementById('ov-btn'),
+  ovBadge: document.getElementById('ov-badge'),
+  slotHold: document.getElementById('slot-hold'),
+  btnMute: document.getElementById('btn-mute'),
+  btnPause: document.getElementById('btn-pause'),
+  wave1: document.getElementById('wave1'),
+  wave2: document.getElementById('wave2'),
+  stage: document.getElementById('stage'),
+};
+const hudCache = { score: -1, high: -1, level: -1, lines: -1 };
+
+function syncHUD(force) {
+  if (force || hudCache.score !== state.score) { el.score.textContent = String(state.score); hudCache.score = state.score; }
+  if (force || hudCache.high !== state.high) { el.high.textContent = String(state.high); hudCache.high = state.high; }
+  if (force || hudCache.level !== state.level) { el.level.textContent = String(state.level); hudCache.level = state.level; }
+  if (force || hudCache.lines !== state.lines) { el.lines.textContent = String(state.lines); hudCache.lines = state.lines; }
+}
+
+function refreshSlots() {
+  el.slotHold.classList.toggle('dim', !state.canHold || !state.holdType);
+}
+
+function setOverlay(kind) {
+  if (kind === 'hidden') { el.overlay.classList.add('hidden'); return; }
+  el.overlay.classList.remove('hidden');
+  if (kind === 'title') {
+    el.ovTitle.textContent = 'NEON TETRIS';
+    el.ovText.innerHTML =
+      '<span class="keys">' +
+      '<span><b>Drag</b> the board to slide</span>' +
+      '<span><b>Tap</b> the board to rotate</span>' +
+      '<span><b>Swipe down</b> soft drop &middot; <b>flick up</b> hard drop</span>' +
+      '<span><b>Two fingers</b> or <b>tap</b> the icon to pause</span>' +
+      '</span>';
+    el.ovBtn.textContent = 'START GAME';
+    el.ovBadge.textContent = 'TOUCH OR KEYBOARD';
+  } else if (kind === 'paused') {
+    el.ovTitle.textContent = 'PAUSED';
+    el.ovText.innerHTML = 'Tap <b>RESUME</b> or press <b>P</b>';
+    el.ovBtn.textContent = 'RESUME';
+    el.ovBadge.textContent = '';
+  } else {
+    el.ovTitle.textContent = 'GAME OVER';
+    el.ovText.innerHTML =
+      'Score <b>' + state.score + '</b> &middot; High <b>' + state.high + '</b><br>' +
+      'Level ' + state.level + ' &middot; ' + state.lines + ' lines cleared';
+    el.ovBtn.textContent = 'PLAY AGAIN';
+    el.ovBadge.textContent = state.score > state.prevHigh ? 'NEW HIGH SCORE' : '';
+  }
+}
+
+function syncMuteUI() {
+  el.btnMute.setAttribute('aria-pressed', state.muted ? 'true' : 'false');
+  el.wave1.style.opacity = state.muted ? '0' : '1';
+  el.wave2.style.opacity = state.muted ? '0' : '1';
+}
+
+/* ============================================================
+   STEP 16: Rendering
+   ========================================================== */
+/* One beveled neon cell in CSS pixel space. */
+function drawCell(g, col, row, size, color, ghost) {
+  const x = col * size;
+  const y = row * size;
+  if (ghost) {
+    g.strokeStyle = color;
+    g.globalAlpha = 0.42;
+    g.lineWidth = 2;
+    g.strokeRect(x + 2, y + 2, size - 4, size - 4);
+    g.globalAlpha = 1;
+    return;
+  }
+  g.fillStyle = color;
+  g.fillRect(x + 1, y + 1, size - 2, size - 2);
+  g.fillStyle = 'rgba(255,255,255,0.32)';
+  g.fillRect(x + 1, y + 1, size - 2, Math.max(2, size * 0.11));          // top bevel
+  g.fillStyle = 'rgba(0,0,0,0.34)';
+  g.fillRect(x + 1, y + size - Math.max(2, size * 0.12), size - 2, Math.max(2, size * 0.11));
+  g.fillStyle = 'rgba(255,255,255,0.10)';
+  g.fillRect(x + 1, y + 1, Math.max(2, size * 0.1), size - 2);           // left edge
+}
+
+function drawGridLines() {
+  const c = view.cell;
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < COLS; i += 1) {
+    ctx.beginPath();
+    ctx.moveTo(i * c + 0.5, 0);
+    ctx.lineTo(i * c + 0.5, view.h);
+    ctx.stroke();
+  }
+  for (let r = 1; r < ROWS; r += 1) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * c + 0.5);
+    ctx.lineTo(view.w, r * c + 0.5);
+    ctx.stroke();
+  }
+}
+
+/* Faint vertical spotlight under the active piece - helps aim on a phone. */
+function drawSpot(p) {
+  const c = view.cell;
+  let minC = COLS;
+  let maxC = -1;
+  for (let r = 0; r < p.matrix.length; r += 1) {
+    for (let cc = 0; cc < p.matrix[r].length; cc += 1) {
+      if (p.matrix[r][cc]) { minC = Math.min(minC, p.col + cc); maxC = Math.max(maxC, p.col + cc); }
+    }
+  }
+  if (maxC < 0) return;
+  const grad = ctx.createLinearGradient(0, 0, 0, view.h);
+  grad.addColorStop(0, 'rgba(255,255,255,0.00)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.055)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(minC * c, 0, (maxC - minC + 1) * c, view.h);
+}
+
+function drawBoard(t) {
+  ctx.clearRect(0, 0, view.w, view.h);
+  drawGridLines();
+
+  // Locked stack; rows mid-clear flash white.
+  for (let r = 0; r < ROWS; r += 1) {
+    const flash = state.clearing && state.clearing.rows.indexOf(r) !== -1;
+    for (let c = 0; c < COLS; c += 1) {
+      const cellType = state.grid[r][c];
+      if (!cellType && !flash) continue;
+      if (flash) {
+        const pulse = 0.5 + 0.5 * Math.sin(t / 40);
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.5 + 0.45 * pulse) + ')';
+        ctx.fillRect(c * view.cell, r * view.cell, view.cell, view.cell);
+      } else {
+        drawCell(ctx, c, r, view.cell, COLORS[cellType], false);
+      }
+    }
+  }
+
+  const p = state.piece;
+  if (!p) return;
+  if (state.status === 'playing') drawSpot(p);
+
+  // Ghost piece at the hard-drop landing row.
+  let ghostRow = p.row;
+  while (!collides(p.matrix, ghostRow + 1, p.col)) ghostRow += 1;
+  if (ghostRow !== p.row) {
+    for (let r = 0; r < p.matrix.length; r += 1) {
+      for (let c = 0; c < p.matrix[r].length; c += 1) {
+        if (p.matrix[r][c]) drawCell(ctx, p.col + c, ghostRow + r, view.cell, COLORS[p.type], true);
+      }
+    }
+  }
+
+  // Active piece on top.
+  for (let r = 0; r < p.matrix.length; r += 1) {
+    for (let c = 0; c < p.matrix[r].length; c += 1) {
+      if (p.matrix[r][c] && p.row + r >= 0) {
+        drawCell(ctx, p.col + c, p.row + r, view.cell, COLORS[p.type], false);
+      }
+    }
+  }
+}
+
+/* Center a piece preview inside its small canvas. */
+function drawPreview(g, type, size) {
+  g.clearRect(0, 0, size, size);
+  if (!type) return;
+  const m = SHAPES[type];
+  let minR = m.length, maxR = -1, minC = m.length, maxC = -1;
+  for (let r = 0; r < m.length; r += 1) {
+    for (let c = 0; c < m[r].length; c += 1) {
+      if (!m[r][c]) continue;
+      minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+      minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+    }
+  }
+  if (maxR < 0) return;
+  const bw = maxC - minC + 1;
+  const bh = maxR - minR + 1;
+  const cell = Math.max(4, Math.floor(Math.min(size / (bw + 0.9), size / (bh + 0.9))));
+  const offX = Math.round((size - bw * cell) / 2);
+  const offY = Math.round((size - bh * cell) / 2);
+  for (let r = minR; r <= maxR; r += 1) {
+    for (let c = minC; c <= maxC; c += 1) {
+      if (!m[r][c]) continue;
+      const x = offX + (c - minC) * cell;
+      const y = offY + (r - minR) * cell;
+      g.fillStyle = COLORS[type];
+      g.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+      g.fillStyle = 'rgba(255,255,255,0.30)';
+      g.fillRect(x + 1, y + 1, cell - 2, Math.max(2, cell * 0.12));
+      g.fillStyle = 'rgba(0,0,0,0.30)';
+      g.fillRect(x + 1, y + cell - Math.max(2, cell * 0.12), cell - 2, Math.max(2, cell * 0.12));
+    }
+  }
+}
+
+/* ============================================================
+   STEP 12: Board touch gestures
+   drag = slide 1:1, tap = rotate, swipe down = soft drop,
+   flick up / fast flick down = hard drop.
+   ========================================================== */
+const touch = {
+  id: null, x0: 0, y0: 0, x: 0, y: 0, t0: 0,
+  accX: 0, soft: false, multi: false,
+  /* NOTE: reset() deliberately does NOT clear `multi`; that flag is only
+     released once every finger is up (boardEnd), so adding a 3rd finger
+     cannot toggle pause a second time mid-gesture. */
+  reset() {
+    this.id = null; this.accX = 0; this.soft = false;
+    this.x0 = this.y0 = this.x = this.y = this.t0 = 0;
+  },
+  active() { return this.id !== null; },
+};
+
+function pointOf(list) {
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i].identifier === touch.id) return list[i];
+  }
+  return null;
+}
+
+function boardStart(e) {
+  Sound.unlock();
+  // STEP 14: two or more fingers = pause, once per gesture.
+  if (e.touches.length > 1) {
+    if (!touch.multi && (state.status === 'playing' || state.status === 'paused')) {
+      touch.multi = true;
+      togglePause();
+    }
+    touch.reset();
+    return;
+  }
+  if (touch.multi) { touch.reset(); return; }   // extra finger after a pause
+  if (touch.active()) return;                    // ignore secondary fingers
+  if (state.status !== 'playing') return;
+  const t = e.changedTouches[0];
+  touch.id = t.identifier;
+  touch.x0 = touch.x = t.clientX;
+  touch.y0 = touch.y = t.clientY;
+  touch.t0 = performance.now();
+  touch.accX = 0;
+  touch.soft = false;
+  input.soft = false;
+  input.softTimer = 0;
+}
+
+function boardMove(e) {
+  if (!touch.active() || touch.multi) return;
+  const t = pointOf(e.touches);
+  if (!t) return;
+  const now = performance.now();
+
+  // Horizontal: one column per DRAG_STEP px of accumulated travel.
+  const step = TUNING.DRAG_STEP;
+  touch.accX += t.clientX - touch.x;
+  touch.x = t.clientX;
+  while (touch.accX >= step) { touch.accX -= step; tryMove(1); }
+  while (touch.accX <= -step) { touch.accX += step; tryMove(-1); }
+
+  const dy = t.clientY - touch.y0;
+  const vy = Math.abs(dy) / Math.max(1, now - touch.t0);
+
+  // Fast downward flick = hard drop (same feel as the DROP button).
+  if (dy > TUNING.FLICK_MIN && vy > TUNING.SOFT_FLICK_V) {
+    input.soft = false;
+    touch.soft = false;
+    hardDrop();
+    touch.reset();
+    return;
+  }
+  // Upward flick = hard drop too (thumb sweeps up off the pad).
+  if (dy < -TUNING.FLICK_MIN && vy > TUNING.FLICK_V) {
+    input.soft = false;
+    touch.soft = false;
+    hardDrop();
+    touch.reset();
+    return;
+  }
+  // Sustained downward drag = soft drop until the finger lifts.
+  if (dy > TUNING.SOFT_INTENT) {
+    touch.soft = true;
+    input.soft = true;
+    input.softTimer = 0;
+  }
+}
+
+function boardEnd(e) {
+  if (e.touches.length > 0) { touch.reset(); return; }   // fingers still down
+  const wasMulti = touch.multi;
+  touch.multi = false;                                     // all fingers up
+  if (wasMulti || !touch.active()) return;
+  const dt = performance.now() - touch.t0;
+  const moved = Math.abs(touch.x - touch.x0) + Math.abs(touch.y - touch.y0);
+  // A short, near-stationary lift with no soft-drop intent = tap to rotate.
+  if (state.status === 'playing' && !touch.soft && dt < TUNING.TAP_MS && moved < TUNING.TAP_SLOP) {
+    rotate(1);
+  }
+  input.soft = false;
+  touch.reset();
+}
+
+/* ============================================================
+   STEP 13 / 14: Bottom control cluster - fires on touchstart for
+   zero-latency response, with a click fallback for mouse/desktop.
+   A timestamp guard swallows the synthetic click after a touch.
+   ========================================================== */
+function onTap(node, down, up) {
+  let touched = 0;
+  node.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    touched = Date.now();
+    Sound.unlock();
+    if (down) down(e);
+  }, { passive: false });
+  node.addEventListener('touchend', (e) => { e.preventDefault(); if (up) up(e); }, { passive: false });
+  node.addEventListener('touchcancel', (e) => { e.preventDefault(); if (up) up(e); }, { passive: false });
+  node.addEventListener('mousedown', (e) => {
+    if (Date.now() - touched < 700) return;
+    if (down) down(e);
+  });
+  node.addEventListener('mouseup', (e) => {
+    if (Date.now() - touched < 700) return;
+    if (up) up(e);
+  });
+  node.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+const hotKeys = {};
+function mark(act, on) {
+  const node = hotKeys[act];
+  if (node) node.classList.toggle('hot', !!on);
+}
+
+/* Shared by the touch pad and the keyboard so both paths behave identically,
+   including the on-button highlight for keyboard players. */
+function pressLeftRight(down, dir) {
+  if (down) {
+    mark(dir < 0 ? 'left' : 'right', true);
+    input.dasDir = dir;
+    input.dasTimer = 0;
+    input.charged = false;
+    input.arr = 0;
+    tryMove(dir);
+  } else {
+    mark(dir < 0 ? 'left' : 'right', false);
+    if (input.dasDir === dir) { input.dasDir = 0; input.charged = false; }
+  }
+}
+
+function wirePad() {
+  document.querySelectorAll('#pad .key').forEach((node) => {
+    const act = node.getAttribute('data-act');
+    if (!act) return;
+    hotKeys[act] = node;
+    if (act === 'left' || act === 'right') {
+      const dir = act === 'left' ? -1 : 1;
+      onTap(node, () => { if (state.status === 'playing') pressLeftRight(true, dir); },
+                 () => pressLeftRight(false, dir));
+    } else if (act === 'cw') {
+      onTap(node, () => { if (state.status === 'playing') rotate(1); });
+    } else if (act === 'ccw') {
+      onTap(node, () => { if (state.status === 'playing') rotate(-1); });
+    } else if (act === 'drop') {
+      onTap(node, () => { if (state.status === 'playing') hardDrop(); });
+    }
+  });
+}
+
+/* ============================================================
+   STEP 15: Keyboard path (desktop testing of the same actions)
+   ========================================================== */
+const GAME_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', ' ', 'Spacebar',
+  'x', 'X', 'z', 'Z', 'p', 'P', 'r', 'R', 'c', 'C', 'm', 'M', 'Enter',
+]);
+
+function handleKeyDown(e) {
+  if (GAME_KEYS.has(e.key)) e.preventDefault();
+  Sound.unlock();                      // keydown also counts as a user gesture
+  const key = e.key === 'Spacebar' ? ' ' : e.key;
+
+  if (state.status === 'title' || state.status === 'over') {
+    if (key === 'Enter' || key === 'r' || key === 'R') newGame();
+    return;
+  }
+  if (key === 'p' || key === 'P') { togglePause(); return; }
+  if (key === 'm' || key === 'M') { toggleMute(); return; }
+  if (state.status !== 'playing' || e.repeat) return;
+
+  switch (key) {
+    case 'ArrowLeft': pressLeftRight(true, -1); break;
+    case 'ArrowRight': pressLeftRight(true, 1); break;
+    case 'ArrowDown': input.soft = true; input.softTimer = 0; softDrop(); break;
+    case 'ArrowUp': case 'x': case 'X': rotate(1); break;
+    case 'z': case 'Z': rotate(-1); break;
+    case 'c': case 'C': holdPiece(); break;
+    case ' ': hardDrop(); break;
+    case 'r': case 'R': newGame(); break;
+    default: break;
+  }
+}
+
+function handleKeyUp(e) {
+  const key = e.key === 'Spacebar' ? ' ' : e.key;
+  switch (key) {
+    case 'ArrowLeft': pressLeftRight(false, -1); break;
+    case 'ArrowRight': pressLeftRight(false, 1); break;
+    case 'ArrowDown': input.soft = false; break;
+    default: break;
+  }
+}
+
+/* ============================================================
+   STEP 12b: Global iOS gesture blockers
+   iOS Safari ignores user-scalable=no, so pinch is blocked here.
+   ========================================================== */
+function blockChrome() {
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('gesturechange', (e) => e.preventDefault());
+  document.addEventListener('gestureend', (e) => e.preventDefault());
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  window.addEventListener('dragstart', (e) => e.preventDefault());
+  window.addEventListener('unload', () => store.set(LS_HIGH, state.high));
+}
+
+/* ============================================================
+   STEP 20b: Update - called once per frame with dt in seconds
+   ========================================================== */
 function update(dt) {
   if (state.status !== 'playing') return;
 
-  // Full-line flash; when done, collapse rows and spawn next.
+  // Full-line flash timer; when done, collapse rows and spawn next.
   if (state.clearing) {
     state.clearing.t -= dt * 1000;
     if (state.clearing.t <= 0) {
@@ -519,36 +1305,36 @@ function update(dt) {
     return;
   }
 
-  // DAS/ARR: horizontal auto-shift while a direction stays held.
-  if (das.dir !== 0) {
-    das.timer += dt * 1000;
-    if (!das.charged && das.timer >= DAS_MS) {
-      tryMove(das.dir);
-      das.charged = true;
-      das.arr = 0;
+  // DAS/ARR: horizontal auto-shift while a button/key stays held.
+  if (input.dasDir !== 0) {
+    input.dasTimer += dt * 1000;
+    if (!input.charged && input.dasTimer >= TUNING.DAS_MS) {
+      tryMove(input.dasDir);
+      input.charged = true;
+      input.arr = 0;
     }
-    if (das.charged) {
-      das.arr += dt * 1000;
-      while (das.arr >= ARR_MS) {
-        das.arr -= ARR_MS;
-        if (!tryMove(das.dir)) { das.arr = 0; break; }
+    if (input.charged) {
+      input.arr += dt * 1000;
+      while (input.arr >= TUNING.ARR_MS) {
+        input.arr -= TUNING.ARR_MS;
+        if (!tryMove(input.dasDir)) { input.arr = 0; break; }
       }
     }
   }
 
-  // Soft drop: fast gravity (60 cells/s) while the Soft button is held.
-  if (keys.down) {
-    softTimer += dt * 1000;
-    while (softTimer >= 1000 / 60) {
-      softTimer -= 1000 / 60;
-      if (!softDrop()) { softTimer = 0; break; }
+  // Soft drop: fast gravity while the board drag / Down key is active.
+  if (input.soft) {
+    input.softTimer += dt * 1000;
+    while (input.softTimer >= TUNING.SOFT_MS) {
+      input.softTimer -= TUNING.SOFT_MS;
+      if (!softDrop()) { input.softTimer = 0; break; }
     }
   }
 
   const p = state.piece;
   if (!p) return;
 
-  // Gravity: accumulate dt; step down one row per interval.
+  // Gravity: accumulate dt; step down one row per gravity interval.
   state.dropTimer += dt;
   const interval = gravityInterval();
   while (state.dropTimer >= interval) {
@@ -560,284 +1346,124 @@ function update(dt) {
   // Lock-in: once resting on the stack, lock after LOCK_DELAY seconds.
   if (collides(p.matrix, p.row + 1, p.col)) {
     state.lockTimer += dt;
-    if (state.lockTimer >= LOCK_DELAY) lockPiece();
+    if (state.lockTimer >= TUNING.LOCK_DELAY) lockPiece();
   } else {
-    state.lockTimer = 0;
+    state.lockTimer = 0;   // falling again - reset the lock timer
   }
 }
 
 /* ============================================================
- *  Rendering
- * ========================================================== */
-function drawCell(g, col, row, size, color, ghost = false) {
-  const x = col * size;
-  const y = row * size;
-  if (ghost) {
-    g.strokeStyle = color;
-    g.globalAlpha = 0.45;
-    g.lineWidth = 2;
-    g.strokeRect(x + 2, y + 2, size - 4, size - 4);
-    g.globalAlpha = 1;
-    return;
-  }
-  g.fillStyle = color;
-  g.fillRect(x + 1, y + 1, size - 2, size - 2);
-  g.fillStyle = 'rgba(255,255,255,0.32)';
-  g.fillRect(x + 1, y + 1, size - 2, 3);          // top bevel
-  g.fillStyle = 'rgba(0,0,0,0.32)';
-  g.fillRect(x + 1, y + size - 4, size - 2, 3);   // bottom bevel
-  g.fillStyle = 'rgba(255,255,255,0.10)';
-  g.fillRect(x + 1, y + 1, 3, size - 2);          // left edge
+   STEP 20c: Wiring + main loop
+   ========================================================== */
+function toggleMute() {
+  state.muted = !state.muted;
+  store.set(LS_MUTE, state.muted ? '1' : '0');
+  syncMuteUI();
+  if (!state.muted) Sound.unlock();
 }
 
-function drawGridLines() {
-  ctx.strokeStyle = 'rgba(255,255,255,0.045)';
-  ctx.lineWidth = 1;
-  for (let c = 1; c < COLS; c += 1) {
-    ctx.beginPath(); ctx.moveTo(c * CELL + 0.5, 0); ctx.lineTo(c * CELL + 0.5, H); ctx.stroke();
-  }
-  for (let r = 1; r < ROWS; r += 1) {
-    ctx.beginPath(); ctx.moveTo(0, r * CELL + 0.5); ctx.lineTo(W, r * CELL + 0.5); ctx.stroke();
-  }
-}
+function wireChrome() {
+  // The board owns its own gestures, so every default is prevented here.
+  boardEl.addEventListener('touchstart', boardStart, { passive: false });
+  boardEl.addEventListener('touchmove', boardMove, { passive: false });
+  boardEl.addEventListener('touchend', boardEnd, { passive: false });
+  boardEl.addEventListener('touchcancel', boardEnd, { passive: false });
 
-function drawBoard(t) {
-  ctx.clearRect(0, 0, W, H);
-  drawGridLines();
-
-  // Locked stack; rows mid-clear flash white.
-  for (let r = 0; r < ROWS; r += 1) {
-    for (let c = 0; c < COLS; c += 1) {
-      const cell = state.grid[r][c];
-      if (!cell) continue;
-      if (state.clearing && state.clearing.rows.includes(r)) {
-        const pulse = 0.5 + 0.5 * Math.sin(t / 40);
-        ctx.fillStyle = `rgba(255,255,255,${0.55 + 0.45 * pulse})`;
-        ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-      } else {
-        drawCell(ctx, c, r, CELL, COLORS[cell]);
-      }
-    }
-  }
-
-  const p = state.piece;
-  if (!p) return;
-
-  // Ghost piece at the hard-drop landing row.
-  let ghostRow = p.row;
-  while (!collides(p.matrix, ghostRow + 1, p.col)) ghostRow += 1;
-  if (ghostRow !== p.row) {
-    for (let r = 0; r < p.matrix.length; r += 1) {
-      for (let c = 0; c < p.matrix[r].length; c += 1) {
-        if (p.matrix[r][c]) drawCell(ctx, p.col + c, ghostRow + r, CELL, COLORS[p.type], true);
-      }
-    }
-  }
-
-  // Active piece on top.
-  for (let r = 0; r < p.matrix.length; r += 1) {
-    for (let c = 0; c < p.matrix[r].length; c += 1) {
-      if (p.matrix[r][c] && p.row + r >= 0) drawCell(ctx, p.col + c, p.row + r, CELL, COLORS[p.type]);
-    }
-  }
-}
-
-/* Center the queued piece in the Next canvas. */
-function drawNext() {
-  nctx.clearRect(0, 0, NEXT_W, NEXT_H);
-  if (!state.nextType) return;
-  const matrix = SHAPES[state.nextType];
-  let minR = 4, maxR = -1, minC = 4, maxC = -1;
-  for (let r = 0; r < matrix.length; r += 1) {
-    for (let c = 0; c < matrix[r].length; c += 1) {
-      if (!matrix[r][c]) continue;
-      minR = Math.min(minR, r); maxR = Math.max(maxR, r);
-      minC = Math.min(minC, c); maxC = Math.max(maxC, c);
-    }
-  }
-  const offX = (NEXT_W - (maxC - minC + 1) * NEXT_CELL) / 2;
-  const offY = (NEXT_H - (maxR - minR + 1) * NEXT_CELL) / 2;
-  for (let r = minR; r <= maxR; r += 1) {
-    for (let c = minC; c <= maxC; c += 1) {
-      if (!matrix[r][c]) continue;
-      const x = offX + (c - minC) * NEXT_CELL;
-      const y = offY + (r - minR) * NEXT_CELL;
-      nctx.fillStyle = COLORS[state.nextType];
-      nctx.fillRect(x + 1, y + 1, NEXT_CELL - 2, NEXT_CELL - 2);
-      nctx.fillStyle = 'rgba(255,255,255,0.30)';
-      nctx.fillRect(x + 1, y + 1, NEXT_CELL - 2, 3);
-      nctx.fillStyle = 'rgba(0,0,0,0.30)';
-      nctx.fillRect(x + 1, y + NEXT_CELL - 4, NEXT_CELL - 2, 3);
-    }
-  }
-}
-
-/* ============================================================
- *  HUD & overlay
- * ========================================================== */
-function syncHUD() {
-  el.score.textContent = String(state.score);
-  el.high.textContent = String(state.high);
-  el.level.textContent = String(state.level);
-  el.lines.textContent = String(state.lines);
-}
-
-function setOverlay(kind) {
-  if (kind === 'hidden') { el.overlay.classList.add('hidden'); return; }
-  el.overlay.classList.remove('hidden');
-  if (kind === 'title') {
-    el.ovTitle.textContent = 'TETRIS';
-    el.ovText.innerHTML = 'Move with <b>&#9664; &#9654;</b> &middot; hold <b>&#9660;</b> to drop<br><b>&#8635;</b> rotate &middot; <b>&#10565;</b> slam';
-    el.ovBtn.textContent = 'START GAME';
-  } else {
-    el.ovTitle.textContent = 'GAME OVER';
-    el.ovText.innerHTML =
-      `Score <b>${state.score}</b> &middot; High <b>${state.high}</b><br>` +
-      `Level ${state.level} &middot; ${state.lines} lines cleared`;
-    el.ovBtn.textContent = 'PLAY AGAIN';
-  }
-}
-
-/* ============================================================
- *  Game flow
- * ========================================================== */
-function newGame() {
-  state.grid = emptyGrid();
-  state.score = 0;
-  state.lines = 0;
-  state.level = 1;
-  state.bag = [];
-  state.clearing = null;
-  state.dropTimer = 0;
-  state.lockTimer = 0;
-  state.lockResets = 0;
-  keys.left = keys.right = keys.down = false;
-  das.dir = 0; das.timer = 0; das.charged = false; das.arr = 0;
-  softTimer = 0;
-  state.nextType = nextFromBag();
-  spawnPiece();
-  state.status = 'playing';
-  setOverlay('hidden');
-  syncHUD();
-}
-
-/* ============================================================
- *  Input — touch (pointer events unify mouse + touch)
- * ========================================================== */
-/* Hold-to-repeat for a direction: one step immediately, then DAS/ARR. */
-function pressDir(dir) {
-  if (state.status !== 'playing') return;
-  if (dir === -1) { keys.left = true; keys.right = false; }
-  else { keys.right = true; keys.left = false; }
-  das.dir = dir; das.timer = 0; das.charged = false; das.arr = 0;
-  tryMove(dir);
-}
-function releaseDir(dir) {
-  if (dir === -1) keys.left = false;
-  else keys.right = false;
-  if (das.dir === dir) { das.dir = 0; das.charged = false; }
-}
-
-/* Wire a button: pointerdown fires onStart, pointerup/cancel/leave fires onEnd. */
-function bindHold(node, onStart, onEnd) {
-  node.addEventListener('pointerdown', (e) => {
+  // Mouse mirrors the touch gestures for desktop testing.
+  let mouseDown = false;
+  boardEl.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    try { node.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    node.classList.add('held');
-    onStart();
+    Sound.unlock();
+    mouseDown = true;
+    touch.id = 'mouse';
+    touch.x0 = touch.x = e.clientX;
+    touch.y0 = touch.y = e.clientY;
+    touch.t0 = performance.now();
+    touch.accX = 0;
+    touch.soft = false;
   });
-  const end = (e) => {
-    e.preventDefault();
-    node.classList.remove('held');
-    onEnd();
-  };
-  node.addEventListener('pointerup', end);
-  node.addEventListener('pointercancel', end);
-  node.addEventListener('pointerleave', end);
+  window.addEventListener('mousemove', (e) => {
+    if (!mouseDown || state.status !== 'playing') return;
+    const step = TUNING.DRAG_STEP;
+    touch.accX += e.clientX - touch.x;
+    touch.x = e.clientX;
+    while (touch.accX >= step) { touch.accX -= step; tryMove(1); }
+    while (touch.accX <= -step) { touch.accX += step; tryMove(-1); }
+    if (e.clientY - touch.y0 > TUNING.SOFT_INTENT) { touch.soft = true; input.soft = true; }
+  });
+  window.addEventListener('mouseup', () => {
+    if (!mouseDown) return;
+    mouseDown = false;
+    const dt = performance.now() - touch.t0;
+    const dy = touch.y - touch.y0;
+    if (state.status === 'playing') {
+      if (!touch.soft && dt < TUNING.TAP_MS && Math.abs(dy) < TUNING.TAP_SLOP) rotate(1);
+      else if (dy < -TUNING.FLICK_MIN) hardDrop();
+    }
+    input.soft = false;
+    touch.reset();
+  });
+
+  onTap(el.ovBtn, () => { Sound.unlock(); newGame(); });
+  onTap(el.btnPause, () => togglePause());
+  onTap(el.btnMute, () => toggleMute());
+  onTap(el.slotHold, () => { if (state.status === 'playing') holdPiece(); });
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('keyup', handleKeyUp);
+  window.addEventListener('blur', () => {
+    input.soft = false;
+    input.dasDir = 0; input.charged = false;
+    mark('left', false); mark('right', false);
+    touch.reset();
+    if (state.status === 'playing') togglePause();
+  });
+
+  // iOS suspends rAF in the background and returns with a huge dt.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      input.soft = false;
+      input.dasDir = 0; input.charged = false;
+      mark('left', false); mark('right', false);
+      touch.reset();
+      if (state.status === 'playing') togglePause();
+    } else {
+      last = 0;
+    }
+  });
+
+  window.addEventListener('resize', fitAll);
+  window.addEventListener('orientationchange', () => { setTimeout(fitAll, 60); setTimeout(fitAll, 320); });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitAll);
+    window.visualViewport.addEventListener('scroll', fitAll);
+  }
+  if (window.ResizeObserver) new ResizeObserver(fitAll).observe(el.stage);
 }
 
-document.querySelectorAll('.ctl').forEach((btn) => {
-  const act = btn.dataset.act;
-  if (act === 'left')      bindHold(btn, () => pressDir(-1), () => releaseDir(-1));
-  else if (act === 'right')bindHold(btn, () => pressDir(1), () => releaseDir(1));
-  else if (act === 'rotate')bindHold(btn, () => rotate(1), () => {});
-  else if (act === 'soft')  bindHold(btn,
-    () => { if (state.status === 'playing') { keys.down = true; softTimer = 0; softDrop(); } },
-    () => { keys.down = false; softTimer = 0; });
-  else if (act === 'hard')  bindHold(btn, () => hardDrop(), () => {});
-});
-
-el.ovBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  newGame();
-});
-
-/* Keyboard support (desktop convenience / testing). */
-const GAME_KEYS = new Set([
-  'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp',
-  ' ', 'Spacebar', 'x', 'X', 'z', 'Z', 'r', 'R', 'Enter',
-]);
-window.addEventListener('keydown', (e) => {
-  if (GAME_KEYS.has(e.key)) e.preventDefault();
-  const key = e.key === 'Spacebar' ? ' ' : e.key;
-  if (state.status === 'title' || state.status === 'over') {
-    if (key === 'Enter' || key === 'r' || key === 'R') newGame();
-    return;
-  }
-  if (key === 'r' || key === 'R') { newGame(); return; }
-  if (state.status !== 'playing' || e.repeat) return;
-  switch (key) {
-    case 'ArrowLeft':  pressDir(-1); break;
-    case 'ArrowRight': pressDir(1); break;
-    case 'ArrowDown':  keys.down = true; softTimer = 0; softDrop(); break;
-    case 'ArrowUp': case 'x': case 'X': rotate(1); break;
-    case 'z': case 'Z': rotate(-1); break;
-    case ' ': hardDrop(); break;
-    default: break;
-  }
-});
-window.addEventListener('keyup', (e) => {
-  const key = e.key === 'Spacebar' ? ' ' : e.key;
-  if (key === 'ArrowLeft') releaseDir(-1);
-  else if (key === 'ArrowRight') releaseDir(1);
-  else if (key === 'ArrowDown') { keys.down = false; softTimer = 0; }
-});
-
-/* Global anti-zoom / anti-scroll / anti-context-menu lockdown. */
-document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-document.addEventListener('dblclick', (e) => e.preventDefault());
-document.addEventListener('contextmenu', (e) => e.preventDefault());
-if (typeof document.addEventListener === 'function') {
-  document.addEventListener('gesturestart', (e) => e.preventDefault()); // Safari pinch
-}
-window.addEventListener('blur', () => {
-  keys.left = keys.right = keys.down = false;
-  das.dir = 0; das.charged = false;
-});
-
-/* ============================================================
- *  Main loop — requestAnimationFrame with a delta cap
- * ========================================================== */
 let last = 0;
 function frame(t) {
   const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016);
   last = t;
   update(dt);
   drawBoard(t);
-  drawNext();
-  syncHUD();
+  drawPreview(hctx, state.holdType, holdEl.clientWidth || 48);
+  drawPreview(nctx, state.nextType, nextEl.clientWidth || 48);
+  syncHUD(false);
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', () => { setupCanvases(); fitBoard(); });
-window.addEventListener('orientationchange', () => { setupCanvases(); fitBoard(); });
-
-// Boot.
-setupCanvases();
-fitBoard();
-requestAnimationFrame(() => fitBoard()); // re-fit after first layout settles
-setOverlay('title');
-requestAnimationFrame(frame);
+/* ============================================================
+   Boot
+   ========================================================== */
+wirePad();
+wireChrome();
+blockChrome();
+syncMuteUI();
+fitAll();
+requestAnimationFrame(() => { fitAll(); setOverlay('title'); });
+requestAnimationFrame(frame);   // kick the main loop - without this first call, frame() never runs
+window.addEventListener('load', fitAll);
+document.fonts && document.fonts.ready && document.fonts.ready.then(fitAll);
 
 })();
 </script>
